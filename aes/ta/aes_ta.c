@@ -69,6 +69,7 @@ int hash(void) {
     // we don't initialize these operations, since the values are not saved on them
     psa_hash_operation_t *hash_operation;
     // we can't use more than one operation at a time due to limitations of the wrapper
+    // so the cloned operation is commented out, but kept in this code since it is in the original code
     // psa_hash_operation_t* cloned_hash_operation;
 
     mbedtls_printf("PSA Crypto API: SHA-256 example\n\n");
@@ -94,6 +95,8 @@ int hash(void) {
         mbedtls_printf("psa_hash_update failed\n");
         goto cleanup;
     }
+    // we can't use more than one operation at a time due to limitations of the wrapper
+    // so the cloned operation is commented out, but kept in this code since it is in the original code
 
     // status = psa_hash_clone(&hash_operation, &cloned_hash_operation);
     // if (status != PSA_SUCCESS) {
@@ -113,6 +116,9 @@ int hash(void) {
         mbedtls_printf("Multi-part hash operation gave the wrong result!\n\n");
         goto cleanup;
     }
+
+    // we can't use more than one operation at a time due to limitations of the wrapper
+    // so the cloned operation is commented out, but kept in this code since it is in the original code
 
     // status =
     //     psa_hash_verify(&cloned_hash_operation, expected_hash,
@@ -159,7 +165,7 @@ int hash(void) {
     return EXIT_SUCCESS;
 
 cleanup:
-    // we dont need to clean the operations up, since we automatically clear them
+    // we don't need to abort the operations, since they are aborted automatically on start of a new operation
     // psa_hash_abort(&hash_operation);
     // psa_hash_abort(&cloned_hash_operation);
     return EXIT_FAILURE;
