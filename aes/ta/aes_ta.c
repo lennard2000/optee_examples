@@ -1,55 +1,14 @@
 /*
- * Copyright (c) 2017, Linaro Limited
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *
- * 1. Redistributions of source code must retain the above copyright notice,
- * this list of conditions and the following disclaimer.
- *
- * 2. Redistributions in binary form must reproduce the above copyright notice,
- * this list of conditions and the following disclaimer in the documentation
- * and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+The code for this example is copied from programs/psa/psa_hash.c from https://github.com/Mbed-TLS/TF-PSA-Crypto/
  */
-#include <inttypes.h>
 
 #include <tee_internal_api.h>
-#include <tee_internal_api_extensions.h>
-
+#include <string.h>
+#include <include/crypto_types.h>
+#include <include/crypto_struct.h>
 #include <aes_ta.h>
-
-#define AES128_KEY_BIT_SIZE		128
-#define AES128_KEY_BYTE_SIZE		(AES128_KEY_BIT_SIZE / 8)
-#define AES256_KEY_BIT_SIZE		256
-#define AES256_KEY_BYTE_SIZE		(AES256_KEY_BIT_SIZE / 8)
-
-/*
- * Ciphering context: each opened session relates to a cipehring operation.
- * - configure the AES flavour from a command.
- * - load key from a command (here the key is provided by the REE)
- * - reset init vector (here IV is provided by the REE)
- * - cipher a buffer frame (here input and output buffers are non-secure)
- */
-struct aes_cipher {
-	uint32_t algo;			/* AES flavour */
-	uint32_t mode;			/* Encode or decode */
-	uint32_t key_size;		/* AES key size in byte */
-	TEE_OperationHandle op_handle;	/* AES ciphering operation */
-	TEE_ObjectHandle key_handle;	/* transient object to load the key */
-};
+#include <include/wrapper.h>
+#include <include/wrapper.c>
 
 /*
  * Few routines to convert IDs from TA API into IDs from OP-TEE.
