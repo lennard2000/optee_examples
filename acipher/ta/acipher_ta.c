@@ -2,16 +2,17 @@
 /*
  * Copyright (c) 2018, Linaro Limited
  */
-
-#include <inttypes.h>
+/*
+The code for this example is copied from programs/psa/crypto_examples.c from https://github.com/Mbed-TLS/TF-PSA-Crypto/
+ */
 
 #include <tee_internal_api.h>
-
+#include <string.h>
+#include <include/crypto_types.h>
 #include <acipher_ta.h>
-
-struct acipher {
-	TEE_ObjectHandle key;
-};
+#include <include/wrapper.h>
+#include <include/wrapper.c>
+#include <include/crypto_struct.h>
 
 static TEE_Result cmd_gen_key(struct acipher *state, uint32_t pt,
 			      TEE_Param params[TEE_NUM_PARAMS])
