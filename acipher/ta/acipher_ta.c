@@ -108,9 +108,9 @@ static psa_status_t cipher_encrypt(psa_key_id_t key,
     psa_status_t status;
     psa_cipher_operation_t* operation;
     size_t iv_len = 0;
-
+    // this call is different, since we dont save data on this variable
+    // we allocate memory in the wrapper
     // memset(&operation, 0, sizeof(operation));
-    // this call is different, since we cant really save data on the psa_cipher_operation_t
     status = psa_cipher_encrypt_setup(operation, key, alg, iv, iv_size);
     ASSERT_STATUS(status, PSA_SUCCESS);
 
@@ -123,6 +123,7 @@ static psa_status_t cipher_encrypt(psa_key_id_t key,
     ASSERT_STATUS(status, PSA_SUCCESS);
 
 exit:
+    // we automatically abort operations as soon as a new operations is started
     // psa_cipher_abort(&operation);
     return status;
 }
@@ -141,7 +142,7 @@ static psa_status_t cipher_decrypt(psa_key_id_t key,
     psa_status_t status;
     // this line is changed, since we don't need to initialize the operation
     psa_cipher_operation_t* operation;
-
+    // we allocate memory in the wrapper
     // memset(&operation, 0, sizeof(operation));
     status = psa_cipher_decrypt_setup(operation, key, alg, iv, iv_size);
     ASSERT_STATUS(status, PSA_SUCCESS);
@@ -154,6 +155,7 @@ static psa_status_t cipher_decrypt(psa_key_id_t key,
     ASSERT_STATUS(status, PSA_SUCCESS);
 
 exit:
+    // we automatically abort operations as soon as a new operations is started
     // psa_cipher_abort(&operation);
     return status;
 }
@@ -206,6 +208,7 @@ cipher_example_encrypt_decrypt_aes_cbc_nopad_1_block(void)
     ASSERT_STATUS(status, PSA_SUCCESS);
 
 exit:
+    // key is overwritten on new keygen
     // psa_destroy_key(key);
     return status;
 }
@@ -278,6 +281,7 @@ static psa_status_t cipher_example_encrypt_decrypt_aes_ctr_multi(void)
     printf(input);
     ASSERT_STATUS(status, PSA_SUCCESS);
 
+    // same here
     // psa_set_key_usage_flags(&attributes,
     //                         PSA_KEY_USAGE_ENCRYPT | PSA_KEY_USAGE_DECRYPT);
     // psa_set_key_algorithm(&attributes, alg);
