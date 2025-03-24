@@ -79,174 +79,124 @@ static TEE_Result alloc_resources(void *session, uint32_t param_types,
 	TEE_Result res;
 	char *key;
 
-	/* Get ciphering context from session ID */
-	DMSG("Session %p: get ciphering resources", session);
-	sess = (struct aes_cipher *)session;
+#define HASH_ALG PSA_ALG_SHA_256
 
-	/* Safely get the invocation parameters */
-	if (param_types != exp_param_types)
-		return TEE_ERROR_BAD_PARAMETERS;
+const uint8_t sample_message[] = "Hello World!";
+/* sample_message is terminated with a null byte which is not part of
+ * the message itself so we make sure to subtract it in order to get
+ * the message length. */
+const size_t sample_message_length = sizeof(sample_message) - 1;
 
-	res = ta2tee_algo_id(params[0].value.a, &sess->algo);
-	if (res != TEE_SUCCESS)
-		return res;
-
-	res = ta2tee_key_size(params[1].value.a, &sess->key_size);
-	if (res != TEE_SUCCESS)
-		return res;
-
-	res = ta2tee_mode_id(params[2].value.a, &sess->mode);
-	if (res != TEE_SUCCESS)
-		return res;
-
-	/*
-	 * Ready to allocate the resources which are:
-	 * - an operation handle, for an AES ciphering of given configuration
-	 * - a transient object that will be use to load the key materials
-	 *   into the AES ciphering operation.
-	 */
-
-	/* Free potential previous operation */
-	if (sess->op_handle != TEE_HANDLE_NULL)
-		TEE_FreeOperation(sess->op_handle);
-
-	/* Allocate operation: AES/CTR, mode and size from params */
-	res = TEE_AllocateOperation(&sess->op_handle,
-				    sess->algo,
-				    sess->mode,
-				    sess->key_size * 8);
-	if (res != TEE_SUCCESS) {
-		EMSG("Failed to allocate operation");
-		sess->op_handle = TEE_HANDLE_NULL;
-		goto err;
-	}
-
-	/* Free potential previous transient object */
-	if (sess->key_handle != TEE_HANDLE_NULL)
-		TEE_FreeTransientObject(sess->key_handle);
-
-	/* Allocate transient object according to target key size */
-	res = TEE_AllocateTransientObject(TEE_TYPE_AES,
-					  sess->key_size * 8,
-					  &sess->key_handle);
-	if (res != TEE_SUCCESS) {
-		EMSG("Failed to allocate transient object");
-		sess->key_handle = TEE_HANDLE_NULL;
-		goto err;
-	}
-
-	/*
-	 * When loading a key in the cipher session, set_aes_key()
-	 * will reset the operation and load a key. But we cannot
-	 * reset and operation that has no key yet (GPD TEE Internal
-	 * Core API Specification – Public Release v1.1.1, section
-	 * 6.2.5 TEE_ResetOperation). In consequence, we will load a
-	 * dummy key in the operation so that operation can be reset
-	 * when updating the key.
-	 */
-	key = TEE_Malloc(sess->key_size, 0);
-	if (!key) {
-		res = TEE_ERROR_OUT_OF_MEMORY;
-		goto err;
-	}
-
-	TEE_InitRefAttribute(&attr, TEE_ATTR_SECRET_VALUE, key, sess->key_size);
-
-	res = TEE_PopulateTransientObject(sess->key_handle, &attr, 1);
-	TEE_Free(key);
-	if (res != TEE_SUCCESS) {
-		EMSG("TEE_PopulateTransientObject failed, %x", res);
-		goto err;
-	}
-
-	res = TEE_SetOperationKey(sess->op_handle, sess->key_handle);
-	if (res != TEE_SUCCESS) {
-		EMSG("TEE_SetOperationKey failed %x", res);
-		goto err;
-	}
-
-	return res;
-
-err:
-	if (sess->op_handle != TEE_HANDLE_NULL)
-		TEE_FreeOperation(sess->op_handle);
-	sess->op_handle = TEE_HANDLE_NULL;
-
-	if (sess->key_handle != TEE_HANDLE_NULL)
-		TEE_FreeTransientObject(sess->key_handle);
-	sess->key_handle = TEE_HANDLE_NULL;
-
-	return res;
+#define EXPECTED_HASH_VALUE {                                                    \
+        0x7f, 0x83, 0xb1, 0x65, 0x7f, 0xf1, 0xfc, 0x53, 0xb9, 0x2d, 0xc1, 0x81, \
+        0x48, 0xa1, 0xd6, 0x5d, 0xfc, 0x2d, 0x4b, 0x1f, 0xa3, 0xd6, 0x77, 0x28, \
+        0x4a, 0xdd, 0xd2, 0x00, 0x12, 0x6d, 0x90, 0x69 \
 }
 
-/*
- * Process command TA_AES_CMD_SET_KEY. API in aes_ta.h
- */
-static TEE_Result set_aes_key(void *session, uint32_t param_types,
-				TEE_Param params[4])
-{
-	const uint32_t exp_param_types =
-		TEE_PARAM_TYPES(TEE_PARAM_TYPE_MEMREF_INPUT,
-				TEE_PARAM_TYPE_NONE,
-				TEE_PARAM_TYPE_NONE,
-				TEE_PARAM_TYPE_NONE);
-	struct aes_cipher *sess;
-	TEE_Attribute attr;
-	TEE_Result res;
-	uint32_t key_sz;
-	char *key;
+const uint8_t expected_hash[] = EXPECTED_HASH_VALUE;
+const size_t expected_hash_len = sizeof(expected_hash);
 
-	/* Get ciphering context from session ID */
-	DMSG("Session %p: load key material", session);
-	sess = (struct aes_cipher *)session;
+int hash(void) {
+    psa_status_t status;
+    uint8_t hash[PSA_HASH_LENGTH(HASH_ALG)];
+    size_t hash_length;
+    // we don't initialize these operations, since the values are not saved on them
+    psa_hash_operation_t *hash_operation;
+    // we can't use more than one operation at a time due to limitations of the wrapper
+    // psa_hash_operation_t* cloned_hash_operation;
 
-	/* Safely get the invocation parameters */
-	if (param_types != exp_param_types)
-		return TEE_ERROR_BAD_PARAMETERS;
+    mbedtls_printf("PSA Crypto API: SHA-256 example\n\n");
 
-	key = params[0].memref.buffer;
-	key_sz = params[0].memref.size;
+    status = psa_crypto_init();
+    if (status != PSA_SUCCESS) {
+        mbedtls_printf("psa_crypto_init failed\n");
+        return EXIT_FAILURE;
+    }
 
-	if (key_sz != sess->key_size) {
-		EMSG("Wrong key size %" PRIu32 ", expect %" PRIu32 " bytes",
-		     key_sz, sess->key_size);
-		return TEE_ERROR_BAD_PARAMETERS;
-	}
+    /* Compute hash using multi-part operation */
+    status = psa_hash_setup(&hash_operation, HASH_ALG);
+    if (status == PSA_ERROR_NOT_SUPPORTED) {
+        mbedtls_printf("unknown hash algorithm supplied\n");
+        return EXIT_FAILURE;
+    } else if (status != PSA_SUCCESS) {
+        mbedtls_printf("psa_hash_setup failed\n");
+        return EXIT_FAILURE;
+    }
 
-	/*
-	 * Load the key material into the configured operation
-	 * - create a secret key attribute with the key material
-	 *   TEE_InitRefAttribute()
-	 * - reset transient object and load attribute data
-	 *   TEE_ResetTransientObject()
-	 *   TEE_PopulateTransientObject()
-	 * - load the key (transient object) into the ciphering operation
-	 *   TEE_SetOperationKey()
-	 *
-	 * TEE_SetOperationKey() requires operation to be in "initial state".
-	 * We can use TEE_ResetOperation() to reset the operation but this
-	 * API cannot be used on operation with key(s) not yet set. Hence,
-	 * when allocating the operation handle, we load a dummy key.
-	 * Thus, set_key sequence always reset then set key on operation.
-	 */
+    status = psa_hash_update(&hash_operation, sample_message, sample_message_length);
+    if (status != PSA_SUCCESS) {
+        mbedtls_printf("psa_hash_update failed\n");
+        goto cleanup;
+    }
 
-	TEE_InitRefAttribute(&attr, TEE_ATTR_SECRET_VALUE, key, key_sz);
+    // status = psa_hash_clone(&hash_operation, &cloned_hash_operation);
+    // if (status != PSA_SUCCESS) {
+    //     mbedtls_printf("PSA hash clone failed\n");
+    //     goto cleanup;
+    // }
 
-	TEE_ResetTransientObject(sess->key_handle);
-	res = TEE_PopulateTransientObject(sess->key_handle, &attr, 1);
-	if (res != TEE_SUCCESS) {
-		EMSG("TEE_PopulateTransientObject failed, %x", res);
-		return res;
-	}
+    status = psa_hash_finish(&hash_operation, hash, sizeof(hash), &hash_length);
+    if (status != PSA_SUCCESS) {
+        mbedtls_printf("psa_hash_finish failed\n");
+        goto cleanup;
+    }
 
-	TEE_ResetOperation(sess->op_handle);
-	res = TEE_SetOperationKey(sess->op_handle, sess->key_handle);
-	if (res != TEE_SUCCESS) {
-		EMSG("TEE_SetOperationKey failed %x", res);
-		return res;
-	}
+    /* Check the result of the operation against the sample */
+    if (hash_length != expected_hash_len ||
+        (memcmp(hash, expected_hash, expected_hash_len) != 0)) {
+        mbedtls_printf("Multi-part hash operation gave the wrong result!\n\n");
+        goto cleanup;
+    }
 
-	return res;
+    // status =
+    //     psa_hash_verify(&cloned_hash_operation, expected_hash,
+    //                     expected_hash_len);
+    // if (status != PSA_SUCCESS) {
+    //     mbedtls_printf("psa_hash_verify failed\n");
+    //     goto cleanup;
+    // } else {
+    //     mbedtls_printf("Multi-part hash operation successful!\n");
+    // }
+
+    /* Clear local variables prior to one-shot hash demo */
+    memset(hash, 0, sizeof(hash));
+    hash_length = 0;
+
+    /* Compute hash using one-shot function call */
+    status = psa_hash_compute(HASH_ALG,
+                              sample_message, sample_message_length,
+                              hash, sizeof(hash),
+                              &hash_length);
+    if (status != PSA_SUCCESS) {
+        mbedtls_printf("psa_hash_compute failed\n");
+        goto cleanup;
+    }
+
+    if (hash_length != expected_hash_len ||
+        (memcmp(hash, expected_hash, expected_hash_len) != 0)) {
+        mbedtls_printf("One-shot hash operation gave the wrong result!\n\n");
+        goto cleanup;
+    }
+
+    mbedtls_printf("One-shot hash operation successful!\n\n");
+
+    /* Print out result */
+    mbedtls_printf("The SHA-256( '%s' ) is: ", sample_message);
+
+    for (size_t j = 0; j < expected_hash_len; j++) {
+        mbedtls_printf("%02x", hash[j]);
+    }
+
+    mbedtls_printf("\n");
+    // this call is not needed, since we clear the operation handle on completion / start of another operation
+    mbedtls_psa_crypto_free();
+    return EXIT_SUCCESS;
+
+cleanup:
+    // we dont need to clean the operations up, since we automatically clear them
+    // psa_hash_abort(&hash_operation);
+    // psa_hash_abort(&cloned_hash_operation);
+    return EXIT_FAILURE;
 }
 
 /*
