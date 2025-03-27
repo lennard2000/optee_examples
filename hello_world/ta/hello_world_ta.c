@@ -176,62 +176,20 @@ void TA_CloseSessionEntryPoint(void *sess_ctx) {
     (void) sess_ctx;
 }
 
-static TEE_Result inc_value(uint32_t param_types,
-	TEE_Param params[4])
-{
-	uint32_t exp_param_types = TEE_PARAM_TYPES(TEE_PARAM_TYPE_VALUE_INOUT,
-						   TEE_PARAM_TYPE_NONE,
-						   TEE_PARAM_TYPE_NONE,
-						   TEE_PARAM_TYPE_NONE);
+TEE_Result TA_InvokeCommandEntryPoint(void *session_id,
+                                      uint32_t command_id,
+                                      uint32_t parameters_type,
+                                      TEE_Param parameters[4]) {
 
-	DMSG("has been called");
+    /* Initialize the PSA crypto library. */
+    // we don't need this
+     PSA_CHECK(psa_crypto_init());
 
-	if (param_types != exp_param_types)
-		return TEE_ERROR_BAD_PARAMETERS;
+    /* Run the demo */
+    hmac_demo();
 
-	IMSG("Got value: %u from NW", params[0].value.a);
-	params[0].value.a++;
-	IMSG("Increase value to: %u", params[0].value.a);
-
-	return TEE_SUCCESS;
-}
-
-static TEE_Result dec_value(uint32_t param_types,
-	TEE_Param params[4])
-{
-	uint32_t exp_param_types = TEE_PARAM_TYPES(TEE_PARAM_TYPE_VALUE_INOUT,
-						   TEE_PARAM_TYPE_NONE,
-						   TEE_PARAM_TYPE_NONE,
-						   TEE_PARAM_TYPE_NONE);
-
-	DMSG("has been called");
-
-	if (param_types != exp_param_types)
-		return TEE_ERROR_BAD_PARAMETERS;
-
-	IMSG("Got value: %u from NW", params[0].value.a);
-	params[0].value.a--;
-	IMSG("Decrease value to: %u", params[0].value.a);
-
-	return TEE_SUCCESS;
-}
-/*
- * Called when a TA is invoked. sess_ctx hold that value that was
- * assigned by TA_OpenSessionEntryPoint(). The rest of the paramters
- * comes from normal world.
- */
-TEE_Result TA_InvokeCommandEntryPoint(void __maybe_unused *sess_ctx,
-			uint32_t cmd_id,
-			uint32_t param_types, TEE_Param params[4])
-{
-	(void)&sess_ctx; /* Unused parameter */
-
-	switch (cmd_id) {
-	case TA_HELLO_WORLD_CMD_INC_VALUE:
-		return inc_value(param_types, params);
-	case TA_HELLO_WORLD_CMD_DEC_VALUE:
-		return dec_value(param_types, params);
-	default:
-		return TEE_ERROR_BAD_PARAMETERS;
-	}
+    /* Deinitialize the PSA crypto library. */
+    //we dont need this, since we free resources automatically
+    mbedtls_psa_crypto_free();
+    return TEE_SUCCESS;
 }
