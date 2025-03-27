@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, Linaro Limited
+* Copyright (c) 2016, Linaro Limited
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -25,8 +25,28 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+/*
+ *  Example computing a SHA-256 hash using the PSA Crypto API
+ *
+ *  The example computes the SHA-256 hash of a test string using the
+ *  one-shot API call psa_hash_compute() and the using multi-part
+ *  operation, which requires psa_hash_setup(), psa_hash_update() and
+ *  psa_hash_finish(). The multi-part operation is popular on embedded
+ *  devices where a rolling hash needs to be computed.
+ *
+ *
+ *  Copyright The Mbed TLS Contributors
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ */
+
 #include <tee_internal_api.h>
-#include <tee_internal_api_extensions.h>
+#include <tee_api_types.h>
+#include <string.h>
+#include <include/crypto_types.h>
+#include <include/wrapper.h>
+#include <include/wrapper.c>
+#include <include/crypto_struct.h>
+
 
 #include <hello_world_ta.h>
 
