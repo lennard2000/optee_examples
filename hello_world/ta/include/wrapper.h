@@ -51,9 +51,6 @@ psa_status_t psa_cipher_encrypt_setup(TEE_OperationHandle
 char *iv,                                      size_t
                                       iv_size);
 
-//psa_status_t cipher_operation(TEE_OperationHandle
-//                              *operationHandle, const uint8_t *input, size_t input_size, size_t part_size,
-//                              uint8_t *output, size_t output_size, size_t output_len);
 void mbedtls_psa_crypto_free(void);
 psa_status_t psa_mac_sign_setup( TEE_OperationHandle *operation,
     psa_algorithm_t alg, TEE_ObjectHandle *key);
