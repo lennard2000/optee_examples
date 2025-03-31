@@ -40,6 +40,7 @@
  */
 
 #include <tee_internal_api.h>
+#include <hello_world_ta.h>
 #include <tee_api_types.h>
 #include <string.h>
 #include <include/crypto_types.h>
@@ -183,13 +184,17 @@ TEE_Result TA_InvokeCommandEntryPoint(void *session_id,
 
     /* Initialize the PSA crypto library. */
     // we don't need this
-     PSA_CHECK(psa_crypto_init());
+    psa_status_t status = psa_crypto_init();
+
+     PSA_CHECK(status);
 
     /* Run the demo */
     hmac_demo();
 
     /* Deinitialize the PSA crypto library. */
     //we dont need this, since we free resources automatically
-    mbedtls_psa_crypto_free();
     return TEE_SUCCESS;
+
+    exit:
+    mbedtls_psa_crypto_free();
 }
