@@ -21,7 +21,7 @@ The code for this example is copied from programs/psa/crypto_examples.c from htt
         {                                                                     \
             printf("\tassertion failed at %s:%d - '%s'\r\n",         \
                    __FILE__, __LINE__, #predicate);                  \
-            goto exit;                                                        \
+            TEE_Panic(0xdeadbeef);                                                        \
         }                                                                     \
     } while (0)
 
@@ -33,7 +33,7 @@ The code for this example is copied from programs/psa/crypto_examples.c from htt
             printf("\tassertion failed at %s:%d - "                  \
                    "actual:%d expected:%d\r\n", __FILE__, __LINE__,  \
                    (psa_status_t) actual, (psa_status_t) expected); \
-            goto exit;                                                        \
+            TEE_Panic(0xdeadbeef);                                                        \
         }                                                                     \
     } while (0)
 
@@ -75,7 +75,7 @@ static psa_status_t cipher_operation(psa_cipher_operation_t *operation,
     while (bytes_written != input_size) {
         bytes_to_write = (input_size - bytes_written > part_size ?
                           part_size :
-                          input_size - bytes_written -1);
+                          input_size - bytes_written);
 
         status = psa_cipher_update(operation, input + bytes_written,
                                    bytes_to_write, output + *output_len,
