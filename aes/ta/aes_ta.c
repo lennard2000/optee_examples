@@ -114,7 +114,7 @@ int hash(void) {
     if (hash_length != expected_hash_len ||
         (memcmp(hash, expected_hash, expected_hash_len) != 0)) {
         mbedtls_printf("Multi-part hash operation gave the wrong result!\n\n");
-        goto cleanup;
+        TEE_Panic(0xdeadbeef);
     }
 
     // we can't use more than one operation at a time due to limitations of the wrapper
@@ -141,13 +141,13 @@ int hash(void) {
                               &hash_length);
     if (status != PSA_SUCCESS) {
         mbedtls_printf("psa_hash_compute failed\n");
-        goto cleanup;
+        TEE_Panic(0xdeadbeef);
     }
 
     if (hash_length != expected_hash_len ||
         (memcmp(hash, expected_hash, expected_hash_len) != 0)) {
         mbedtls_printf("One-shot hash operation gave the wrong result!\n\n");
-        goto cleanup;
+        TEE_Panic(0xdeadbeef);
     }
 
     mbedtls_printf("One-shot hash operation successful!\n\n");
