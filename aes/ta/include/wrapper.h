@@ -52,8 +52,8 @@ char *iv,                                      size_t
                                       iv_size);
 
 void mbedtls_psa_crypto_free(void);
-psa_status_t psa_mac_sign_setup( TEE_OperationHandle *operation,
-    psa_algorithm_t alg, TEE_ObjectHandle *key);
+psa_status_t psa_mac_sign_setup(TEE_OperationHandle *operation, TEE_ObjectHandle *key,
+                                psa_algorithm_t alg);
 psa_status_t psa_mac_update(TEE_OperationHandle *operation, const void *chunk,
                             size_t chunkSize);
 psa_status_t psa_mac_sign_finish(TEE_OperationHandle *operation,void *mac, size_t macLen, size_t* macSize);

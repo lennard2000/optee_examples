@@ -136,6 +136,9 @@ TEE_Result psa_alg_to_tee_alg(psa_algorithm_t alg, uint32_t *teeAlgo) {
         case PSA_ALG_CBC_PKCS7:
             *teeAlgo = TEE_ALG_AES_CTR;
             break;
+        case PSA_ALG_HMAC(PSA_ALG_SHA_256):
+            *teeAlgo = TEE_ALG_HMAC_SHA256;
+        break;
 
 
         //            TEE_ALG_AES_ECB_NOPAD
@@ -160,7 +163,6 @@ TEE_Result psa_alg_to_tee_alg(psa_algorithm_t alg, uint32_t *teeAlgo) {
 
 
         default:
-            IMSG("Algo not present\n");
             return TEE_ERROR_NOT_IMPLEMENTED;
     }
     return TEE_SUCCESS;
@@ -206,7 +208,7 @@ TEE_Result get_object_type_from_algo(uint32_t teeAlgo, uint32_t *tee_type) {
         case TEE_ALG_RSASSA_PKCS1_PSS_MGF1_SHA512:
             *tee_type = TEE_TYPE_RSA_KEYPAIR;
             break;
-        case TEE_ALG_SHA256:
+        case TEE_ALG_HMAC_SHA256:
             *tee_type = TEE_TYPE_HMAC_SHA256;
             break;
         default:
@@ -222,6 +224,8 @@ TEE_Result verify_key_size_by_type(uint32_t tee_type, int *key_size) {
     if (key_size == NULL || *key_size == 0) {
         overwrite_key_size = true;
     }
+    IMSG("verify_key_size_by_type TEE_Type is: %u", tee_type);
+    IMSG("key_size is %d", *key_size);
     switch (tee_type) {
         case TEE_TYPE_AES:
             if (*key_size == 128 || *key_size == 192 || *key_size == 256) {
@@ -252,17 +256,22 @@ TEE_Result verify_key_size_by_type(uint32_t tee_type, int *key_size) {
             if (*key_size == 64)
                 return TEE_SUCCESS;
             if (overwrite_key_size) newValue = 64;
+            break;
+        case TEE_TYPE_HMAC_SHA256:
+            if (*key_size == 128 || *key_size == 192 || *key_size == 256) {
+                return TEE_SUCCESS;
+            }
+            if (overwrite_key_size) newValue = 256;
+            break;
     }
     if (overwrite_key_size) {
         *key_size = newValue;
         return TEE_ERROR_BAD_PARAMETERS;
     }
-    IMSG("%d", overwrite_key_size);
     return TEE_ERROR_NOT_IMPLEMENTED;
 }
 
 psa_status_t psa_generate_random(void *buffer, size_t bufferSize) {
-    IMSG("entered random");
     TEE_GenerateRandom(buffer, bufferSize);
     return PSA_SUCCESS;
 }
@@ -272,31 +281,54 @@ psa_status_t psa_generate_key(int key_bits, psa_algorithm_t psaAlgorithm,
     uint32_t tee_algo;
     uint32_t tee_type;
     TEE_Result status = psa_alg_to_tee_alg(psaAlgorithm, &tee_algo);
-    TEE_FreeTransientObject(sessionctx->key_handle);
-    sessionctx->key_handle = TEE_HANDLE_NULL;
-
     if (status != TEE_SUCCESS) {
         IMSG("Algo not present\n");
+        return PSA_ERROR_NOT_SUPPORTED;
     }
+    sessionctx->key_handle = TEE_HANDLE_NULL;
     status = get_object_type_from_algo(tee_algo, &tee_type);
 
     if (status != TEE_SUCCESS) {
-        //error catching here
+        IMSG("Key type not present\n");
+        return PSA_ERROR_NOT_SUPPORTED;
     }
     status = verify_key_size_by_type(tee_type, &key_bits);
-    if (status != TEE_SUCCESS || status != TEE_ERROR_BAD_PARAMETERS) {
+    if (status != TEE_SUCCESS) {
         IMSG("wrong key bits %d", key_bits);
     }
     sessionctx->key_size = key_bits;
-    status = TEE_AllocateTransientObject(tee_type, sessionctx->key_size, &sessionctx->key_handle);
+    switch(tee_type) {
+      case TEE_TYPE_HMAC_SHA256 : {
+        uint8_t key_data[key_bits / 8];  // 256-bit HMAC key
+        TEE_Attribute attr;
+        TEE_GenerateRandom(key_data, sizeof(key_data));
+        status = TEE_AllocateTransientObject(tee_type, sizeof(key_data) * 8, &sessionctx->key_handle);
+        if (status != TEE_SUCCESS) {
+          IMSG("TEE_AllocateTransientObject failed\n");
+          return PSA_ERROR_NOT_SUPPORTED;
+        };
 
-    if (status != TEE_SUCCESS) {
-        IMSG("allocate failed \n");
-    }
-    status = TEE_GenerateKey(sessionctx->key_handle, sessionctx->key_size, NULL, 0);
-    if (status != TEE_SUCCESS) {
-        IMSG("failed to generate key");
-        //        error handling here
+        TEE_InitRefAttribute(&attr, TEE_ATTR_SECRET_VALUE, key_data, sizeof(key_data));
+        IMSG("TEE_InitRefAttribute");
+        status = TEE_PopulateTransientObject(sessionctx->key_handle, &attr, 1);
+        if (status != TEE_SUCCESS) {
+          IMSG("Failed to poulate Object");
+          return PSA_ERROR_NOT_SUPPORTED;
+          };
+        break;
+        }
+      default: {
+            status = TEE_AllocateTransientObject(tee_type, sessionctx->key_size, &sessionctx->key_handle);
+            if (status != TEE_SUCCESS) {
+                  IMSG("TEE_AllocateTransientObject failed\n");
+                  return PSA_ERROR_NOT_SUPPORTED;
+            };
+            status = TEE_GenerateKey(sessionctx->key_handle, sessionctx->key_size, NULL, 0);
+            if (status != TEE_SUCCESS) {
+                IMSG("failed to generate key");
+                //        error handling here
+            }
+          }
     }
     return PSA_SUCCESS;
 }
@@ -387,11 +419,11 @@ psa_status_t psa_cipher_update(TEE_OperationHandle
 
 psa_status_t psa_cipher_finish(TEE_OperationHandle
                                *operationHandle,
-                               uint8_t *output, size_t output_size, size_t output_len) {
+                               uint8_t *output, size_t output_size, size_t* output_len) {
     if (sessionctx->op_handle == TEE_HANDLE_NULL) {
         IMSG("OP not defined");
     }
-    TEE_Result res = TEE_CipherDoFinal(sessionctx->op_handle, "", 0, output, &output_size);
+    TEE_Result res = TEE_CipherDoFinal(sessionctx->op_handle, NULL, 0, output, &output_size);
     if (res != TEE_SUCCESS) {
         IMSG("Operation failed");
         IMSG("error type: %u", res);
@@ -399,6 +431,8 @@ psa_status_t psa_cipher_finish(TEE_OperationHandle
     IMSG("Operation finished, clearing operation");
     TEE_FreeOperation(sessionctx->op_handle);
     sessionctx->op_handle = TEE_HANDLE_NULL;
+    // this function is only used to finish the cipher, so 0 bytes are written
+    *output_len = 0;
     return PSA_SUCCESS;
 }
 
@@ -425,9 +459,9 @@ psa_status_t create_session(void *session) {
 void mbedtls_psa_crypto_free() {
 }
 
-psa_status_t psa_mac_sign_setup(TEE_OperationHandle *operation,
-                                psa_algorithm_t alg, TEE_ObjectHandle *key) {
-    uint32_t teeAlgo;
+psa_status_t psa_mac_sign_setup(TEE_OperationHandle *operation, TEE_ObjectHandle *key,
+                                psa_algorithm_t alg) {
+  uint32_t teeAlgo;
     psa_status_t res;
     res = psa_alg_to_tee_alg(alg, &teeAlgo);
     if (res != PSA_SUCCESS) {
@@ -435,29 +469,28 @@ psa_status_t psa_mac_sign_setup(TEE_OperationHandle *operation,
         return PSA_ERROR_NOT_SUPPORTED;
     }
     sessionctx->algo = teeAlgo;
-    sessionctx->op_handle = *operation;
-    sessionctx->mode = TEE_MODE_DIGEST;
-    IMSG("assigned op to struc");
-    TEE_AllocateOperation(&sessionctx->op_handle, sessionctx->algo, sessionctx->mode, sessionctx->key_size);
-    IMSG("allocated op");
+    TEE_AllocateOperation(&sessionctx->op_handle, sessionctx->algo, TEE_MODE_MAC, sessionctx->key_size);
+    res = TEE_SetOperationKey(sessionctx->op_handle, sessionctx->key_handle);
+    TEE_MACInit(sessionctx->op_handle, NULL, 0);
+    IMSG("hmac OP init successfully");
     return PSA_SUCCESS;
 }
 
 psa_status_t psa_mac_update(TEE_OperationHandle *operation, const void *chunk,
                             size_t chunkSize) {
-     TEE_MACUpdate(&sessionctx->op_handle, chunk, chunkSize);
-
+    TEE_MACUpdate(sessionctx->op_handle, chunk, chunkSize);
     return PSA_SUCCESS;
 }
 psa_status_t psa_mac_sign_finish(TEE_OperationHandle *operation,void *mac, size_t macLen, size_t* macSize) {
     psa_status_t res;
-    res =  TEE_MACComputeFinal(sessionctx->op_handle,"", 0, mac, &macLen);
+    res =  TEE_MACComputeFinal(sessionctx->op_handle,NULL, 0, mac, &macLen);
     TEE_FreeOperation(sessionctx->op_handle);
+    sessionctx->op_handle = TEE_HANDLE_NULL;
     if (res != TEE_SUCCESS) {
         IMSG("mac sign failed\n");
         return PSA_ERROR_GENERIC_ERROR;
     }
-    *macSize = macSize;
+    *macSize = macLen;
 
     return PSA_SUCCESS;
 }
