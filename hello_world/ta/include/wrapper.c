@@ -2,6 +2,12 @@
 #include <crypto_values.h>
 #include <tee_internal_api.h>
 
+#define RETURN_IF_FAIL(res, msg) \
+if ((res) != TEE_SUCCESS) { \
+EMSG(msg ": 0x%x", res); \
+return PSA_ERROR_GENERIC_ERROR; \
+}
+
 struct optee_operation_context {
     uint32_t algo;
     uint32_t type;
@@ -23,11 +29,7 @@ psa_status_t psa_hash_setup(
     psa_algorithm_t alg) {
     uint32_t teeAlgo;
     psa_status_t res;
-    res = psa_alg_to_tee_alg(alg, &teeAlgo);
-    if (res != PSA_SUCCESS) {
-        IMSG("Algo not supported\n");
-        return PSA_ERROR_NOT_SUPPORTED;
-    }
+    RETURN_IF_FAIL(psa_alg_to_tee_alg(alg, &teeAlgo), "Algo not supported\n");
     sessionctx->algo = teeAlgo;
     sessionctx->op_handle = *operation;
     sessionctx->mode = TEE_MODE_DIGEST;
@@ -43,37 +45,14 @@ psa_status_t psa_hash_compute(psa_algorithm_t alg,
                               uint8_t *hash,
                               size_t hash_size,
                               size_t *hash_length) {
-    IMSG("started");
-
     uint32_t teeAlgo;
-    IMSG("defined teeAlgo");
+    RETURN_IF_FAIL(psa_alg_to_tee_alg(alg, &teeAlgo), "Algo not supported\n");
 
-    psa_status_t algoStatus = psa_alg_to_tee_alg(alg, &teeAlgo);
-    IMSG("executed mapping");
-
-    if (algoStatus != PSA_SUCCESS) {
-        IMSG("Algo not supported\n");
-        return PSA_ERROR_NOT_SUPPORTED;
-    }
-
-
-    TEE_Result res;
     sessionctx->algo = teeAlgo;
     sessionctx->mode = TEE_MODE_DIGEST;
-
-    res = TEE_AllocateOperation(&sessionctx->op_handle, sessionctx->algo, sessionctx->mode, 0);
-    if (res != TEE_SUCCESS) {
-        IMSG("tee allocation failed\n");
-        return PSA_ERROR_GENERIC_ERROR;
-    }
-
-    res = TEE_DigestDoFinal(sessionctx->op_handle, input, input_length, hash, &hash_size);
+    RETURN_IF_FAIL(TEE_AllocateOperation(&sessionctx->op_handle, sessionctx->algo, sessionctx->mode, 0), "Hash Operation Allocation failed\n");
+    RETURN_IF_FAIL(TEE_DigestDoFinal(sessionctx->op_handle, input, input_length, hash, &hash_size), "Hash final failed\n");
     TEE_FreeOperation(sessionctx->op_handle);
-    if (res != TEE_SUCCESS) {
-        IMSG("Optee digest failed\n");
-        return PSA_ERROR_GENERIC_ERROR;
-    }
-
     *hash_length = hash_size;
     return PSA_SUCCESS;
 }
@@ -81,15 +60,14 @@ psa_status_t psa_hash_compute(psa_algorithm_t alg,
 psa_status_t psa_hash_update(TEE_OperationHandle __unused *operationHandle, const uint8_t *input,
                              size_t input_length) {
     TEE_DigestUpdate(sessionctx->op_handle, input, input_length);
-    IMSG("updated hash input");
+
     return PSA_SUCCESS;
 }
 
 psa_status_t psa_hash_finish(TEE_OperationHandle __unused *operationHandle, uint8_t *hash,
                              size_t hash_size,
                              size_t *hash_length) {
-    TEE_DigestDoFinal(sessionctx->op_handle, "", 0, hash, &hash_size);
-    IMSG("processed do on final");
+    RETURN_IF_FAIL(TEE_DigestDoFinal(sessionctx->op_handle, NULL, 0, hash, &hash_size), "Hash final failed\n");
     *hash_length = hash_size;
     TEE_FreeOperation(sessionctx->op_handle);
     return PSA_SUCCESS;
@@ -280,54 +258,27 @@ psa_status_t psa_generate_key(int key_bits, psa_algorithm_t psaAlgorithm,
                               TEE_ObjectHandle *key) {
     uint32_t tee_algo;
     uint32_t tee_type;
-    TEE_Result status = psa_alg_to_tee_alg(psaAlgorithm, &tee_algo);
-    if (status != TEE_SUCCESS) {
-        IMSG("Algo not present\n");
-        return PSA_ERROR_NOT_SUPPORTED;
-    }
-    sessionctx->key_handle = TEE_HANDLE_NULL;
-    status = get_object_type_from_algo(tee_algo, &tee_type);
+    RETURN_IF_FAIL(psa_alg_to_tee_alg(psaAlgorithm, &tee_algo), "Algo not supported\n");
 
-    if (status != TEE_SUCCESS) {
-        IMSG("Key type not present\n");
-        return PSA_ERROR_NOT_SUPPORTED;
-    }
-    status = verify_key_size_by_type(tee_type, &key_bits);
-    if (status != TEE_SUCCESS) {
-        IMSG("wrong key bits %d", key_bits);
-    }
+    sessionctx->key_handle = TEE_HANDLE_NULL;
+    RETURN_IF_FAIL(get_object_type_from_algo(tee_algo, &tee_type), "Key type not present\n");
+    RETURN_IF_FAIL(verify_key_size_by_type(tee_type, &key_bits), "wrong key bits ");
+
     sessionctx->key_size = key_bits;
     switch(tee_type) {
       case TEE_TYPE_HMAC_SHA256 : {
         uint8_t key_data[key_bits / 8];  // 256-bit HMAC key
         TEE_Attribute attr;
         TEE_GenerateRandom(key_data, sizeof(key_data));
-        status = TEE_AllocateTransientObject(tee_type, sizeof(key_data) * 8, &sessionctx->key_handle);
-        if (status != TEE_SUCCESS) {
-          IMSG("TEE_AllocateTransientObject failed\n");
-          return PSA_ERROR_NOT_SUPPORTED;
-        };
+        RETURN_IF_FAIL(TEE_AllocateTransientObject(tee_type, sizeof(key_data) * 8, &sessionctx->key_handle), "Failed to allocate Operation\n");
 
         TEE_InitRefAttribute(&attr, TEE_ATTR_SECRET_VALUE, key_data, sizeof(key_data));
-        IMSG("TEE_InitRefAttribute");
-        status = TEE_PopulateTransientObject(sessionctx->key_handle, &attr, 1);
-        if (status != TEE_SUCCESS) {
-          IMSG("Failed to poulate Object");
-          return PSA_ERROR_NOT_SUPPORTED;
-          };
+        RETURN_IF_FAIL(TEE_PopulateTransientObject(sessionctx->key_handle, &attr, 1), "Failed to poulate Object");
         break;
         }
       default: {
-            status = TEE_AllocateTransientObject(tee_type, sessionctx->key_size, &sessionctx->key_handle);
-            if (status != TEE_SUCCESS) {
-                  IMSG("TEE_AllocateTransientObject failed\n");
-                  return PSA_ERROR_NOT_SUPPORTED;
-            };
-            status = TEE_GenerateKey(sessionctx->key_handle, sessionctx->key_size, NULL, 0);
-            if (status != TEE_SUCCESS) {
-                IMSG("failed to generate key");
-                //        error handling here
-            }
+            RETURN_IF_FAIL(TEE_AllocateTransientObject(tee_type, sessionctx->key_size, &sessionctx->key_handle), "Failed to allocate Operation\n");
+            RETURN_IF_FAIL(TEE_GenerateKey(sessionctx->key_handle, sessionctx->key_size, NULL, 0), "failed to generate key");
           }
     }
     return PSA_SUCCESS;
@@ -341,41 +292,22 @@ psa_status_t psa_cipher_setup(TEE_OperationHandle
                               char *iv,
                               size_t
                               iv_size, uint32_t mode) {
-    TEE_Result result;
-
-
     uint32_t tee_alg;
-    psa_status_t res;
-    res = psa_alg_to_tee_alg(psaAlgorithm, &tee_alg);
-    if (res != PSA_SUCCESS) {
-        IMSG("algo failed \n");
-    }
-
+    RETURN_IF_FAIL(psa_alg_to_tee_alg(psaAlgorithm, &tee_alg), "Algo not supported\n");
     sessionctx->algo = tee_alg;
     sessionctx->mode = mode;
 
     if (sessionctx->op_handle != TEE_HANDLE_NULL) {
-        IMSG("op was not null");
+        IMSG("op was not null, clearing operation handle\n");
         TEE_ResetOperation(sessionctx->op_handle);
     }
-
-    IMSG("started Allocation");
-    result = TEE_AllocateOperation(&sessionctx->op_handle,
+    RETURN_IF_FAIL(TEE_AllocateOperation(&sessionctx->op_handle,
                                    sessionctx->algo,
                                    sessionctx->mode,
-                                   sessionctx->key_size);
-    if (result != TEE_SUCCESS) {
-        IMSG("failed op");
-    }
-    IMSG("Allocation finished");
+                                   sessionctx->key_size), "Cipher Operation allocation failed\n");
+    RETURN_IF_FAIL(TEE_SetOperationKey(sessionctx->op_handle, sessionctx->key_handle), "Failed to set operation key for cipher operation\n");
 
-    TEE_Result res1 = TEE_SetOperationKey(sessionctx->op_handle, sessionctx->key_handle);
-    if (res1 != TEE_SUCCESS) {
-        IMSG("key setting failed");
-    }
-    IMSG("Key set");
     TEE_CipherInit(sessionctx->op_handle, iv, iv_size);
-    IMSG("cipher innit \n");
 
     return PSA_SUCCESS;
 }
@@ -402,17 +334,10 @@ psa_status_t psa_cipher_update(TEE_OperationHandle
                                *operationHandle, const uint8_t *input, size_t input_size,
                                uint8_t *output, size_t output_size, size_t* output_len) {
     if (sessionctx->op_handle == TEE_HANDLE_NULL) {
-        IMSG("OP not defined");
+        IMSG("Cipher operation not initialized, psa_cipher_decrypt_setup / psa_cipher_encrypt_setup needs to be called before psa_cipher_update \n");
+        return PSA_ERROR_NOT_SUPPORTED;
     }
-    TEE_Result result = TEE_CipherUpdate(sessionctx->op_handle, input, input_size, output, &output_size);
-    if (result == TEE_ERROR_SHORT_BUFFER)
-    {
-        IMSG("Buffer too short");
-    }
-    if (result != TEE_SUCCESS) {
-        IMSG("Error updating cipher %d", result);
-        return PSA_ERROR_BAD_STATE;
-    }
+    RETURN_IF_FAIL(TEE_CipherUpdate(sessionctx->op_handle, input, input_size, output, &output_size), "Error updating cipher\n");
     *output_len = output_size;
     return PSA_SUCCESS;
 }
@@ -421,14 +346,10 @@ psa_status_t psa_cipher_finish(TEE_OperationHandle
                                *operationHandle,
                                uint8_t *output, size_t output_size, size_t* output_len) {
     if (sessionctx->op_handle == TEE_HANDLE_NULL) {
-        IMSG("OP not defined");
+        IMSG("Cipher operation not initialized, psa_cipher_decrypt_setup / psa_cipher_encrypt_setup needs to be called before psa_cipher_finish \n");
     }
-    TEE_Result res = TEE_CipherDoFinal(sessionctx->op_handle, NULL, 0, output, &output_size);
-    if (res != TEE_SUCCESS) {
-        IMSG("Operation failed");
-        IMSG("error type: %u", res);
-    }
-    IMSG("Operation finished, clearing operation");
+    RETURN_IF_FAIL(TEE_CipherDoFinal(sessionctx->op_handle, NULL, 0, output, &output_size), "psa_cipher_finish failed\n");
+
     TEE_FreeOperation(sessionctx->op_handle);
     sessionctx->op_handle = TEE_HANDLE_NULL;
     // this function is only used to finish the cipher, so 0 bytes are written
@@ -461,18 +382,12 @@ void mbedtls_psa_crypto_free() {
 
 psa_status_t psa_mac_sign_setup(TEE_OperationHandle *operation, TEE_ObjectHandle *key,
                                 psa_algorithm_t alg) {
-  uint32_t teeAlgo;
-    psa_status_t res;
-    res = psa_alg_to_tee_alg(alg, &teeAlgo);
-    if (res != PSA_SUCCESS) {
-        IMSG("Algo not supported\n");
-        return PSA_ERROR_NOT_SUPPORTED;
-    }
+    uint32_t teeAlgo;
+    RETURN_IF_FAIL(psa_alg_to_tee_alg(alg, &teeAlgo), "Algo not supported\n");
     sessionctx->algo = teeAlgo;
     TEE_AllocateOperation(&sessionctx->op_handle, sessionctx->algo, TEE_MODE_MAC, sessionctx->key_size);
-    res = TEE_SetOperationKey(sessionctx->op_handle, sessionctx->key_handle);
+    RETURN_IF_FAIL(TEE_SetOperationKey(sessionctx->op_handle, sessionctx->key_handle), "Failed to set operation key for MAC sign \n");
     TEE_MACInit(sessionctx->op_handle, NULL, 0);
-    IMSG("hmac OP init successfully");
     return PSA_SUCCESS;
 }
 
@@ -482,14 +397,10 @@ psa_status_t psa_mac_update(TEE_OperationHandle *operation, const void *chunk,
     return PSA_SUCCESS;
 }
 psa_status_t psa_mac_sign_finish(TEE_OperationHandle *operation,void *mac, size_t macLen, size_t* macSize) {
-    psa_status_t res;
-    res =  TEE_MACComputeFinal(sessionctx->op_handle,NULL, 0, mac, &macLen);
+    RETURN_IF_FAIL(TEE_MACComputeFinal(sessionctx->op_handle,NULL, 0, mac, &macLen), "Mac sign failed\n");
     TEE_FreeOperation(sessionctx->op_handle);
     sessionctx->op_handle = TEE_HANDLE_NULL;
-    if (res != TEE_SUCCESS) {
-        IMSG("mac sign failed\n");
-        return PSA_ERROR_GENERIC_ERROR;
-    }
+
     *macSize = macLen;
 
     return PSA_SUCCESS;
