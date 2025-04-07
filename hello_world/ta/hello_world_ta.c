@@ -92,7 +92,7 @@ void print_buf(const char *title, uint8_t *buf, size_t len)
                    (int) status,                               \
                    __LINE__,                                   \
                    #expr);                                    \
-            goto exit;                                          \
+            TEE_Panic(0xdeadbeef);                                          \
         }                                                       \
     }                                                           \
     while (0)
@@ -105,7 +105,7 @@ psa_status_t hmac_demo(void)
 {
     psa_status_t status;
     const psa_algorithm_t alg = PSA_ALG_HMAC(PSA_ALG_SHA_256);
-    uint8_t out[PSA_MAC_MAX_SIZE]; // safe but not optimal
+    uint8_t out[32]; // safe but not optimal
     /* PSA_MAC_LENGTH(PSA_KEY_TYPE_HMAC, 8 * sizeof( key_bytes ), alg)
      * should work but see https://github.com/Mbed-TLS/mbedtls/issues/4320 */
 
@@ -120,7 +120,7 @@ psa_status_t hmac_demo(void)
     // psa_set_key_type(&attributes, PSA_KEY_TYPE_HMAC);
     // psa_set_key_bits(&attributes, 8 * sizeof(key_bytes));     // optional
 
-    status = psa_generate_key(*key_bytes, alg, &key);
+    status = psa_generate_key(8 * sizeof( key_bytes ), alg, &key);
     if (status != PSA_SUCCESS) {
         return status;
     }
@@ -132,14 +132,14 @@ psa_status_t hmac_demo(void)
     size_t out_len = 0;
 
     /* compute HMAC(key, msg1_part1 | msg1_part2) */
-    PSA_CHECK(psa_mac_sign_setup(&op, key, &alg));
+    PSA_CHECK(psa_mac_sign_setup(&op, &key, alg));
     PSA_CHECK(psa_mac_update(&op, msg1_part1, sizeof(msg1_part1)));
     PSA_CHECK(psa_mac_update(&op, msg1_part2, sizeof(msg1_part2)));
     PSA_CHECK(psa_mac_sign_finish(&op, out, sizeof(out), &out_len));
     print_buf("msg1", out, out_len);
 
     /* compute HMAC(key, msg2_part1 | msg2_part2) */
-    PSA_CHECK(psa_mac_sign_setup(&op, key, &alg));
+    PSA_CHECK(psa_mac_sign_setup(&op, &key, alg));
     PSA_CHECK(psa_mac_update(&op, msg2_part1, sizeof(msg2_part1)));
     PSA_CHECK(psa_mac_update(&op, msg2_part2, sizeof(msg2_part2)));
     PSA_CHECK(psa_mac_sign_finish(&op, out, sizeof(out), &out_len));
@@ -161,14 +161,7 @@ TEE_Result TA_CreateEntryPoint(void) {
 void TA_DestroyEntryPoint(void) {}
 
 TEE_Result TA_OpenSessionEntryPoint(uint32_t param_types, TEE_Param params[4], void **sess_ctx) {
-    (void) param_types;
-    (void) params;
-    (void) sess_ctx;
-
-    psa_status_t status = psa_crypto_init();
-    if (status != PSA_SUCCESS) {
-        return TEE_ERROR_GENERIC;
-    }
+    create_session(sess_ctx);
 
     return TEE_SUCCESS;
 }
