@@ -4,10 +4,12 @@ export V ?= 0
 HOST_CROSS_COMPILE ?= $(CROSS_COMPILE)
 TA_CROSS_COMPILE ?= $(CROSS_COMPILE)
 
+
 .PHONY: all
 all:
 	$(MAKE) -C host CROSS_COMPILE="$(HOST_CROSS_COMPILE)" --no-builtin-variables
-	$(MAKE) -C ta CROSS_COMPILE="$(TA_CROSS_COMPILE)" LDFLAGS=""
+	$(MAKE) -C ta CROSS_COMPILE="$(TA_CROSS_COMPILE)" TA_DEV_KIT_DIR="$(TA_DEV_KIT_DIR)"             \
+                                                      		LDFLAGS=""
 
 .PHONY: clean
 clean:
